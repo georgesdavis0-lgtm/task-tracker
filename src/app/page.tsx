@@ -21,7 +21,7 @@ export default function Home() {
   const [syncStatus, setSyncStatus] = useState('Loading...');
   const [view, setView] = useState<'board' | 'list'>('board');
   const [search, setSearch] = useState('');
-  const [filters, setFilters] = useState({ sprint: 'all', priority: 'all', area: 'all', assignee: 'all' });
+  const [filters, setFilters] = useState({ sprint: 'all', priority: 'all', area: 'all', project: 'all', assignee: 'all' });
   const [sortField, setSortField] = useState('id');
   const [sortAsc, setSortAsc] = useState(true);
   const [modalTask, setModalTask] = useState<DevTask | null>(null);
@@ -66,6 +66,7 @@ export default function Home() {
       if (filters.sprint !== 'all' && t.sprint !== filters.sprint) return false;
       if (filters.priority !== 'all' && t.priority !== filters.priority) return false;
       if (filters.area !== 'all' && t.area !== filters.area) return false;
+      if (filters.project !== 'all' && t.project !== filters.project) return false;
       if (filters.assignee !== 'all' && t.assignee !== filters.assignee) return false;
       if (
         q &&
@@ -289,6 +290,14 @@ export default function Home() {
           ))}
         </select>
         <select
+          value={filters.project}
+          onChange={(e) => setFilters((f) => ({ ...f, project: e.target.value }))}
+          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
+        >
+          <option value="all">All Projects</option>
+          {PROJECTS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
           value={filters.assignee}
           onChange={(e) => setFilters((f) => ({ ...f, assignee: e.target.value }))}
           className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
