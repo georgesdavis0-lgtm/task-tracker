@@ -24,6 +24,33 @@ export const PROJECTS = [
   { id: 'xactimate', name: 'RoofingLogic Xactimate', color: '#8b5cf6' },
 ] as const;
 
+export const AREAS = [
+  'Calc Engine',
+  'Canvass',
+  'Crew Management',
+  'CRM / Contacts',
+  'Email',
+  'Estimate Builder',
+  'Financials',
+  'Inspection Form',
+  'Invoicing',
+  'Job Board',
+  'Job Configuration',
+  'Landing Page',
+  'Lead',
+  'Material Orders',
+  'Measurements/Parsing',
+  'Navigation / Routing',
+  'Platform/Workflow',
+  'Proposals',
+  'Sales/Settings',
+  'Scheduling / Calendar',
+  'Settings',
+  'Template Selection',
+  'UI/UX',
+  'User Management',
+] as const;
+
 export const STATUSES = ['todo', 'in-progress', 'review', 'blocked', 'done'] as const;
 
 export const STATUS_LABELS: Record<string, string> = {

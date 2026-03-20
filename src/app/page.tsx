@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { DevTask, PROJECTS, STATUSES, STATUS_LABELS } from '@/lib/types';
+import { DevTask, PROJECTS, AREAS, STATUSES, STATUS_LABELS } from '@/lib/types';
 
 function getProjectById(id: string) {
   return PROJECTS.find((p) => p.id === id) || { id, name: id, color: '#64748b' };
@@ -52,6 +52,17 @@ export default function Home() {
   // Filter tasks
   const areas = useMemo(
     () => [...new Set(tasks.map((t) => t.area).filter(Boolean))].sort() as string[],
+    [tasks]
+  );
+
+  const sprints = useMemo(
+    () =>
+      [...new Set(tasks.map((t) => t.sprint).filter(Boolean))]
+        .sort((a, b) => {
+          const na = parseInt((a as string).replace('Sprint ', ''), 10);
+          const nb = parseInt((b as string).replace('Sprint ', ''), 10);
+          return na - nb;
+        }) as string[],
     [tasks]
   );
 
@@ -243,19 +254,18 @@ export default function Home() {
           ))}
         </div>
         <div className="h-4 w-px bg-gray-700" />
-        <div className="flex gap-1">
-          {['all', 'Sprint 7', 'Sprint 8', 'Sprint 9'].map((s) => (
-            <button
-              key={s}
-              onClick={() => setFilters((f) => ({ ...f, sprint: s }))}
-              className={`px-2 py-1 rounded text-xs ${
-                filters.sprint === s ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'
-              }`}
-            >
-              {s === 'all' ? 'All Sprints' : s}
-            </button>
+        <select
+          value={filters.sprint}
+          onChange={(e) => setFilters((f) => ({ ...f, sprint: e.target.value }))}
+          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
+        >
+          <option value="all">All Sprints</option>
+          {sprints.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
           ))}
-        </div>
+        </select>
         <div className="flex gap-1">
           {['all', 'high', 'medium', 'low'].map((p) => (
             <button
@@ -416,6 +426,8 @@ export default function Home() {
                   { key: 'priority', label: 'Priority' },
                   { key: 'status', label: 'Status' },
                   { key: 'assignee', label: 'Assignee' },
+                  { key: 'created', label: 'Created' },
+                  { key: 'updated_at', label: 'Updated' },
                 ].map((col) => (
                   <th
                     key={col.key}
@@ -466,6 +478,10 @@ export default function Home() {
                     </span>
                   </td>
                   <td className="py-2 px-3">{task.assignee || ''}</td>
+                  <td className="py-2 px-3 text-gray-500 whitespace-nowrap">{task.created || ''}</td>
+                  <td className="py-2 px-3 text-gray-500 whitespace-nowrap">
+                    {task.updated_at ? new Date(task.updated_at).toLocaleDateString() : ''}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -478,6 +494,7 @@ export default function Home() {
         <TaskModal
           task={modalTask}
           saving={saving}
+          sprints={sprints}
           onSave={saveTask}
           onDelete={deleteTask}
           onClose={() => setModalOpen(false)}
@@ -492,16 +509,20 @@ export default function Home() {
 function TaskModal({
   task,
   saving,
+  sprints,
   onSave,
   onDelete,
   onClose,
 }: {
   task: DevTask | null;
   saving: boolean;
+  sprints: string[];
   onSave: (t: DevTask) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
 }) {
+  const [addingSprint, setAddingSprint] = useState(false);
+  const [newSprintNum, setNewSprintNum] = useState('');
   const [form, setForm] = useState<DevTask>(
     task || {
       id: '',
@@ -594,29 +615,82 @@ function TaskModal({
             </div>
             <div>
               <label className="block text-xs text-gray-400 mb-1">Sprint</label>
-              <select
-                value={form.sprint || ''}
-                onChange={(e) => set('sprint', e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm"
-              >
-                {['Sprint 7', 'Sprint 8', 'Sprint 9', 'Sprint 10'].map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+              {addingSprint ? (
+                <div className="flex gap-1">
+                  <input
+                    type="number"
+                    min={1}
+                    placeholder="#"
+                    value={newSprintNum}
+                    onChange={(e) => setNewSprintNum(e.target.value)}
+                    className="w-16 bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-blue-500"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (newSprintNum) {
+                        set('sprint', `Sprint ${newSprintNum}`);
+                        setAddingSprint(false);
+                        setNewSprintNum('');
+                      }
+                    }}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded-lg text-xs"
+                  >
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setAddingSprint(false); setNewSprintNum(''); }}
+                    className="text-gray-400 hover:text-white px-1 text-xs"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-1">
+                  <select
+                    value={form.sprint || ''}
+                    onChange={(e) => set('sprint', e.target.value)}
+                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="">Select sprint...</option>
+                    {sprints.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                    {form.sprint && !sprints.includes(form.sprint) && (
+                      <option value={form.sprint}>{form.sprint}</option>
+                    )}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setAddingSprint(true)}
+                    className="bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded-lg text-xs whitespace-nowrap"
+                  >
+                    + New
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-gray-400 mb-1">Area</label>
-              <input
+              <select
                 value={form.area || ''}
                 onChange={(e) => set('area', e.target.value)}
-                placeholder="e.g. Calc Engine"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-              />
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="">Select area...</option>
+                {AREAS.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs text-gray-400 mb-1">Type</label>
