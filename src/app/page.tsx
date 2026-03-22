@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { DevTask, PROJECTS, AREAS, STATUSES, STATUS_LABELS } from '@/lib/types';
+import { DevTask, PROJECTS, AREAS, STATUSES, STATUS_LABELS, FeatureSubmission, SUBMISSION_TYPE_LABELS, SUBMISSION_STATUS_LABELS, SUBMISSION_STATUSES } from '@/lib/types';
 
 function getProjectById(id: string) {
   return PROJECTS.find((p) => p.id === id) || { id, name: id, color: '#64748b' };
@@ -19,7 +19,7 @@ export default function Home() {
   const [tasks, setTasks] = useState<DevTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState('Loading...');
-  const [view, setView] = useState<'board' | 'list'>('board');
+  const [view, setView] = useState<'board' | 'list' | 'submissions'>('board');
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ sprint: 'all', priority: 'all', area: 'all', project: 'all', assignee: 'all' });
   const [sortField, setSortField] = useState('id');
@@ -27,6 +27,48 @@ export default function Home() {
   const [modalTask, setModalTask] = useState<DevTask | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Submissions state
+  const [submissions, setSubmissions] = useState<FeatureSubmission[]>([]);
+  const [subFilter, setSubFilter] = useState('all');
+  const [expandedSubId, setExpandedSubId] = useState<string | null>(null);
+  const [subActioning, setSubActioning] = useState<string | null>(null);
+
+  const loadSubmissions = useCallback(async () => {
+    try {
+      const res = await fetch('/api/submit');
+      if (res.ok) {
+        const data = await res.json();
+        setSubmissions(Array.isArray(data) ? data : []);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    loadSubmissions();
+    const interval = setInterval(loadSubmissions, 30000);
+    return () => clearInterval(interval);
+  }, [loadSubmissions]);
+
+  const newSubmissionCount = useMemo(() => submissions.filter(s => s.status === 'new').length, [submissions]);
+
+  const filteredSubmissions = useMemo(() => {
+    if (subFilter === 'all') return submissions;
+    return submissions.filter(s => s.status === subFilter);
+  }, [submissions, subFilter]);
+
+  async function updateSubmission(id: string, updates: Record<string, unknown>) {
+    setSubActioning(id);
+    try {
+      const res = await fetch('/api/submit', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, ...updates }),
+      });
+      if (res.ok) await loadSubmissions();
+    } catch { /* ignore */ }
+    setSubActioning(null);
+  }
 
   // Load tasks
   const loadTasks = useCallback(async () => {
@@ -244,7 +286,7 @@ export default function Home() {
           {['board', 'list'].map((v) => (
             <button
               key={v}
-              onClick={() => setView(v as 'board' | 'list')}
+              onClick={() => setView(v as 'board' | 'list' | 'submissions')}
               className={`px-3 py-1 rounded text-sm capitalize ${
                 view === v ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
               }`}
@@ -252,7 +294,21 @@ export default function Home() {
               {v}
             </button>
           ))}
+          <button
+            onClick={() => setView('submissions')}
+            className={`px-3 py-1 rounded text-sm flex items-center gap-1.5 ${
+              view === 'submissions' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            Submissions
+            {newSubmissionCount > 0 && (
+              <span className="bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                {newSubmissionCount}
+              </span>
+            )}
+          </button>
         </div>
+        {view !== 'submissions' && <>
         <div className="h-4 w-px bg-gray-700" />
         <select
           value={filters.sprint}
@@ -323,10 +379,11 @@ export default function Home() {
             </option>
           ))}
         </select>
+        </>}
       </div>
 
-      {/* Stats */}
-      <div className="flex flex-wrap gap-4 mb-5 text-sm text-gray-400">
+      {/* Stats — hidden in submissions view */}
+      {view !== 'submissions' && <div className="flex flex-wrap gap-4 mb-5 text-sm text-gray-400">
         <span>
           <span className="text-white font-semibold">{stats.total}</span> total
         </span>
@@ -348,7 +405,7 @@ export default function Home() {
         <span>
           <span className="text-white font-semibold">{stats.totalHours}</span> est. hours
         </span>
-      </div>
+      </div>}
 
       {/* Board View */}
       {view === 'board' && (
@@ -486,6 +543,162 @@ export default function Home() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Submissions View */}
+      {view === 'submissions' && (
+        <div>
+          {/* Submission filters */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            {['all', ...SUBMISSION_STATUSES].map(s => (
+              <button
+                key={s}
+                onClick={() => setSubFilter(s)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                  subFilter === s ? 'bg-gray-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'
+                }`}
+              >
+                {s === 'all' ? 'All' : SUBMISSION_STATUS_LABELS[s]}
+                {s === 'new' && newSubmissionCount > 0 && (
+                  <span className="ml-1 bg-blue-600 text-white px-1.5 py-0.5 rounded-full text-xs">
+                    {newSubmissionCount}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {filteredSubmissions.length === 0 ? (
+            <div className="rounded-xl border border-gray-800 bg-gray-900 p-12 text-center text-gray-500">
+              No submissions found.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredSubmissions.map(sub => {
+                const isExpanded = expandedSubId === sub.id;
+                return (
+                  <div key={sub.id} className="rounded-xl border border-gray-800 bg-gray-900 transition-colors hover:border-gray-700">
+                    <button
+                      type="button"
+                      onClick={() => setExpandedSubId(isExpanded ? null : sub.id)}
+                      className="flex w-full items-center gap-3 px-4 py-3 text-left"
+                    >
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                        sub.type === 'bug' ? 'type-bug' : sub.type === 'feature' ? 'type-feature' : 'type-enhancement'
+                      }`}>
+                        {SUBMISSION_TYPE_LABELS[sub.type]}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{sub.title}</span>
+                      {sub.submitted_by_name && (
+                        <span className="hidden shrink-0 text-xs text-gray-500 sm:inline">{sub.submitted_by_name}</span>
+                      )}
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                        sub.status === 'new' ? 'bg-blue-500/20 text-blue-400'
+                        : sub.status === 'reviewed' ? 'bg-amber-500/20 text-amber-400'
+                        : sub.status === 'accepted' ? 'bg-green-500/20 text-green-400'
+                        : 'bg-zinc-500/20 text-zinc-400'
+                      }`}>
+                        {SUBMISSION_STATUS_LABELS[sub.status]}
+                      </span>
+                      <span className="shrink-0 text-xs text-gray-600">
+                        {new Date(sub.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </span>
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
+                        className={`shrink-0 text-gray-600 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                        <path d="M4 6l4 4 4-4" />
+                      </svg>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="border-t border-gray-800 px-4 py-4 space-y-4">
+                        <div>
+                          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">Description</p>
+                          <p className="whitespace-pre-wrap text-sm text-gray-300">{sub.description}</p>
+                        </div>
+
+                        {(sub.submitted_by_name || sub.submitted_by_email || sub.submitted_by_phone) && (
+                          <div>
+                            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">Contact</p>
+                            <div className="flex flex-wrap gap-4 text-sm text-gray-400">
+                              {sub.submitted_by_name && <span>{sub.submitted_by_name}</span>}
+                              {sub.submitted_by_email && (
+                                <a href={`mailto:${sub.submitted_by_email}`} className="text-blue-400 hover:underline">
+                                  {sub.submitted_by_email}
+                                </a>
+                              )}
+                              {sub.submitted_by_phone && <span>{sub.submitted_by_phone}</span>}
+                            </div>
+                          </div>
+                        )}
+
+                        {sub.linked_task_id && (
+                          <div className="text-xs text-gray-500">
+                            Linked to task: <span className="text-blue-400">{sub.linked_task_id}</span>
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {sub.status === 'new' && (
+                            <>
+                              <button
+                                onClick={() => updateSubmission(sub.id, { status: 'reviewed' })}
+                                disabled={subActioning === sub.id}
+                                className="rounded-lg bg-amber-600 hover:bg-amber-700 px-4 py-2 text-xs font-medium text-white transition-colors disabled:opacity-50"
+                              >
+                                {subActioning === sub.id ? 'Updating...' : 'Mark Reviewed'}
+                              </button>
+                              <button
+                                onClick={() => updateSubmission(sub.id, { status: 'accepted' })}
+                                disabled={subActioning === sub.id}
+                                className="rounded-lg bg-green-600 hover:bg-green-700 px-4 py-2 text-xs font-medium text-white transition-colors disabled:opacity-50"
+                              >
+                                Accept
+                              </button>
+                              <button
+                                onClick={() => updateSubmission(sub.id, { status: 'declined' })}
+                                disabled={subActioning === sub.id}
+                                className="rounded-lg bg-zinc-600 hover:bg-zinc-700 px-4 py-2 text-xs font-medium text-white transition-colors disabled:opacity-50"
+                              >
+                                Decline
+                              </button>
+                            </>
+                          )}
+                          {sub.status === 'reviewed' && (
+                            <>
+                              <button
+                                onClick={() => updateSubmission(sub.id, { status: 'accepted' })}
+                                disabled={subActioning === sub.id}
+                                className="rounded-lg bg-green-600 hover:bg-green-700 px-4 py-2 text-xs font-medium text-white transition-colors disabled:opacity-50"
+                              >
+                                Accept
+                              </button>
+                              <button
+                                onClick={() => updateSubmission(sub.id, { status: 'declined' })}
+                                disabled={subActioning === sub.id}
+                                className="rounded-lg bg-zinc-600 hover:bg-zinc-700 px-4 py-2 text-xs font-medium text-white transition-colors disabled:opacity-50"
+                              >
+                                Decline
+                              </button>
+                            </>
+                          )}
+                          {sub.status === 'declined' && (
+                            <button
+                              onClick={() => updateSubmission(sub.id, { status: 'new' })}
+                              disabled={subActioning === sub.id}
+                              className="rounded-lg bg-blue-600 hover:bg-blue-700 px-4 py-2 text-xs font-medium text-white transition-colors disabled:opacity-50"
+                            >
+                              Reopen
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

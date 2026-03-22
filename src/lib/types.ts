@@ -60,3 +60,36 @@ export const STATUS_LABELS: Record<string, string> = {
   blocked: 'Blocked',
   done: 'Done',
 };
+
+// ── Feature Submissions (client-facing) ──
+
+export interface FeatureSubmission {
+  id: string;
+  type: 'bug' | 'feature' | 'improvement';
+  title: string;
+  description: string;
+  submitted_by_name: string | null;
+  submitted_by_email: string | null;
+  submitted_by_phone: string | null;
+  status: 'new' | 'reviewed' | 'accepted' | 'declined';
+  linked_task_id: string | null; // ID of dev_tasks entry if converted
+  created_at: string;
+  reviewed_at: string | null;
+}
+
+export const SUBMISSION_TYPES = ['bug', 'feature', 'improvement'] as const;
+
+export const SUBMISSION_TYPE_LABELS: Record<string, string> = {
+  bug: 'Bug Report',
+  feature: 'Feature Request',
+  improvement: 'Improvement',
+};
+
+export const SUBMISSION_STATUSES = ['new', 'reviewed', 'accepted', 'declined'] as const;
+
+export const SUBMISSION_STATUS_LABELS: Record<string, string> = {
+  new: 'New',
+  reviewed: 'Reviewed',
+  accepted: 'Accepted',
+  declined: 'Declined',
+};
