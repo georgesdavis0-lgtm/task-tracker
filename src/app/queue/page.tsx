@@ -22,7 +22,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import Link from 'next/link';
-import { DevTask, PROJECTS } from '@/lib/types';
+import { DevTask, PROJECTS, AREAS, STATUSES } from '@/lib/types';
 import './queue.css';
 
 // ── Constants ──
@@ -121,9 +121,10 @@ function Toast({ message, type, onDismiss }: { message: string; type: 'success' 
 
 // ── Sortable Card ──
 
-function SortableQueueCard({ task, onQuickAction }: {
+function SortableQueueCard({ task, onQuickAction, onClick }: {
   task: DevTask;
   onQuickAction: (taskId: string, action: 'start' | 'done' | 'block') => void;
+  onClick: (task: DevTask) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
@@ -137,25 +138,29 @@ function SortableQueueCard({ task, onQuickAction }: {
 
   return (
     <div ref={setNodeRef} style={style} className={isDragging ? 'queue-card-dragging' : ''}>
-      <QueueCard task={task} onQuickAction={onQuickAction} dragHandleProps={{ ...attributes, ...listeners }} />
+      <QueueCard task={task} onQuickAction={onQuickAction} onClick={onClick} dragHandleProps={{ ...attributes, ...listeners }} />
     </div>
   );
 }
 
 // ── Queue Card ──
 
-function QueueCard({ task, onQuickAction, dragHandleProps, isOverlay }: {
+function QueueCard({ task, onQuickAction, onClick, dragHandleProps, isOverlay }: {
   task: DevTask;
   onQuickAction: (taskId: string, action: 'start' | 'done' | 'block') => void;
+  onClick?: (task: DevTask) => void;
   dragHandleProps?: Record<string, unknown>;
   isOverlay?: boolean;
 }) {
   const proj = getProjectById(task.project);
 
   return (
-    <div className={`queue-card bg-gray-900 border border-gray-800 rounded-lg p-3 priority-${task.priority} ${
-      isOverlay ? 'queue-drag-overlay' : 'hover:border-gray-600'
-    } transition-colors relative group`}>
+    <div
+      className={`queue-card bg-gray-900 border border-gray-800 rounded-lg p-3 priority-${task.priority} ${
+        isOverlay ? 'queue-drag-overlay' : 'hover:border-gray-600 cursor-pointer'
+      } transition-colors relative group`}
+      onClick={() => !isOverlay && onClick?.(task)}
+    >
       <div className="flex gap-2">
         {/* Drag handle */}
         <div
@@ -258,10 +263,11 @@ function QueueCard({ task, onQuickAction, dragHandleProps, isOverlay }: {
 
 // ── Queue Column ──
 
-function QueueColumn({ assignee, tasks, onQuickAction }: {
+function QueueColumn({ assignee, tasks, onQuickAction, onTaskClick }: {
   assignee: string;
   tasks: DevTask[];
   onQuickAction: (taskId: string, action: 'start' | 'done' | 'block') => void;
+  onTaskClick: (task: DevTask) => void;
 }) {
   const totalHours = tasks.reduce((s, t) => s + (t.est_hours || 0), 0);
   const inProgress = tasks.filter(t => t.status === 'in-progress').length;
@@ -292,7 +298,7 @@ function QueueColumn({ assignee, tasks, onQuickAction }: {
             </div>
           )}
           {tasks.map(task => (
-            <SortableQueueCard key={task.id} task={task} onQuickAction={onQuickAction} />
+            <SortableQueueCard key={task.id} task={task} onQuickAction={onQuickAction} onClick={onTaskClick} />
           ))}
         </div>
       </SortableContext>
@@ -309,6 +315,11 @@ export default function QueuePage() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [queueOrder, setQueueOrder] = useState<Record<string, string[]>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [editingTask, setEditingTask] = useState<DevTask | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [addToQueueOpen, setAddToQueueOpen] = useState(false);
+  const [addToQueueSearch, setAddToQueueSearch] = useState('');
   const orderInitialized = useRef(false);
 
   const sensors = useSensors(
@@ -356,6 +367,78 @@ export default function QueuePage() {
     }
     return result;
   }, [allTasks, queueOrder]);
+
+  // ── Sprints for modal ──
+  const sprints = useMemo(
+    () =>
+      [...new Set(allTasks.map(t => t.sprint).filter(Boolean))]
+        .sort((a, b) => {
+          const na = parseInt((a as string).replace('Sprint ', ''), 10);
+          const nb = parseInt((b as string).replace('Sprint ', ''), 10);
+          return na - nb;
+        }) as string[],
+    [allTasks]
+  );
+
+  // ── Unassigned tasks for "Add to Queue" ──
+  const unassignedTasks = useMemo(() => {
+    const q = addToQueueSearch.toLowerCase();
+    return allTasks.filter(t =>
+      t.status !== 'done' &&
+      !ASSIGNEES.includes(t.assignee as typeof ASSIGNEES[number]) &&
+      (!q || t.title.toLowerCase().includes(q) || t.id.toLowerCase().includes(q))
+    );
+  }, [allTasks, addToQueueSearch]);
+
+  // ── Task click → open edit modal ──
+  function handleTaskClick(task: DevTask) {
+    setEditingTask(task);
+    setModalOpen(true);
+  }
+
+  // ── Save from modal ──
+  async function handleModalSave(task: DevTask) {
+    setSaving(true);
+    const ok = await saveTask(task);
+    setSaving(false);
+    if (ok) {
+      setModalOpen(false);
+      setEditingTask(null);
+      setToast({ message: `${task.id} updated`, type: 'success' });
+      await loadTasks();
+    } else {
+      setToast({ message: `Failed to save ${task.id}`, type: 'error' });
+    }
+  }
+
+  // ── Delete from modal ──
+  async function handleModalDelete(id: string) {
+    if (!confirm('Delete this task?')) return;
+    try {
+      const res = await fetch(`/api/tasks?id=${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      setAllTasks(prev => prev.filter(t => t.id !== id));
+      setModalOpen(false);
+      setEditingTask(null);
+      setToast({ message: `${id} deleted`, type: 'success' });
+    } catch {
+      setToast({ message: 'Delete failed', type: 'error' });
+    }
+  }
+
+  // ── Assign task to queue ──
+  async function assignToQueue(taskId: string, assignee: string) {
+    const task = allTasks.find(t => t.id === taskId);
+    if (!task) return;
+    const updated = { ...task, assignee };
+    const ok = await saveTask(updated);
+    if (ok) {
+      setToast({ message: `${task.id} → ${assignee}'s queue`, type: 'success' });
+      await loadTasks();
+    } else {
+      setToast({ message: 'Failed to assign', type: 'error' });
+    }
+  }
 
   // ── Persist order ──
   function updateOrder(newOrder: Record<string, string[]>) {
@@ -537,12 +620,20 @@ export default function QueuePage() {
             {syncStatus}
           </span>
         </div>
-        <Link
-          href="/"
-          className="text-sm text-gray-400 hover:text-white transition-colors"
-        >
-          ← Back to Dashboard
-        </Link>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setAddToQueueOpen(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors"
+          >
+            + Add to Queue
+          </button>
+          <Link
+            href="/"
+            className="text-sm text-gray-400 hover:text-white transition-colors"
+          >
+            ← Dashboard
+          </Link>
+        </div>
       </div>
 
       {/* Columns */}
@@ -560,6 +651,7 @@ export default function QueuePage() {
               assignee={name}
               tasks={columns[name] || []}
               onQuickAction={handleQuickAction}
+              onTaskClick={handleTaskClick}
             />
           ))}
         </div>
@@ -575,6 +667,85 @@ export default function QueuePage() {
         </DragOverlay>
       </DndContext>
 
+      {/* Task Edit Modal */}
+      {modalOpen && editingTask && (
+        <TaskEditModal
+          task={editingTask}
+          saving={saving}
+          sprints={sprints}
+          onSave={handleModalSave}
+          onDelete={handleModalDelete}
+          onClose={() => { setModalOpen(false); setEditingTask(null); }}
+        />
+      )}
+
+      {/* Add to Queue Modal */}
+      {addToQueueOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) { setAddToQueueOpen(false); setAddToQueueSearch(''); } }}
+        >
+          <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <div className="p-4 border-b border-gray-800">
+              <h2 className="text-lg font-semibold mb-3">Add Task to Queue</h2>
+              <input
+                autoFocus
+                type="text"
+                placeholder="Search unassigned tasks..."
+                value={addToQueueSearch}
+                onChange={(e) => setAddToQueueSearch(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                {unassignedTasks.length} unassigned task{unassignedTasks.length !== 1 ? 's' : ''} found
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {unassignedTasks.length === 0 && (
+                <div className="text-center text-gray-500 text-sm py-8">
+                  No unassigned tasks found
+                </div>
+              )}
+              {unassignedTasks.slice(0, 50).map(task => (
+                <div
+                  key={task.id}
+                  className={`bg-gray-800 border border-gray-700 rounded-lg p-3 priority-${task.priority}`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-gray-500">#{task.id}</span>
+                    {task.type && (
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${getTypeClass(task.type)}`}>
+                        {task.type}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-sm font-medium mb-2">{task.title}</div>
+                  <div className="flex items-center gap-2">
+                    {ASSIGNEES.map(name => (
+                      <button
+                        key={name}
+                        onClick={() => { assignToQueue(task.id, name); }}
+                        className="bg-blue-600/80 hover:bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
+                      >
+                        → {name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="p-4 border-t border-gray-800">
+              <button
+                onClick={() => { setAddToQueueOpen(false); setAddToQueueSearch(''); }}
+                className="text-sm text-gray-400 hover:text-white"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Toast */}
       {toast && (
         <Toast
@@ -583,6 +754,156 @@ export default function QueuePage() {
           onDismiss={() => setToast(null)}
         />
       )}
+    </div>
+  );
+}
+
+// ── Task Edit Modal (replicated from page.tsx to avoid modifying it) ──
+
+function TaskEditModal({
+  task,
+  saving,
+  sprints,
+  onSave,
+  onDelete,
+  onClose,
+}: {
+  task: DevTask;
+  saving: boolean;
+  sprints: string[];
+  onSave: (t: DevTask) => void;
+  onDelete: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState<DevTask>(task);
+
+  function set(field: string, value: string | number) {
+    setForm(f => ({ ...f, [field]: value }));
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    onSave(form);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <form
+        onSubmit={handleSubmit}
+        className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6"
+      >
+        <h2 className="text-lg font-semibold mb-4">Edit Task — {task.id}</h2>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Title *</label>
+            <input
+              required
+              autoFocus
+              value={form.title}
+              onChange={(e) => set('title', e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Description</label>
+            <textarea
+              value={form.description || ''}
+              onChange={(e) => set('description', e.target.value)}
+              rows={3}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Project</label>
+              <select value={form.project} onChange={(e) => set('project', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm">
+                {PROJECTS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Sprint</label>
+              <select value={form.sprint || ''} onChange={(e) => set('sprint', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm">
+                <option value="">Select sprint...</option>
+                {sprints.map(s => <option key={s} value={s}>{s}</option>)}
+                {form.sprint && !sprints.includes(form.sprint) && <option value={form.sprint}>{form.sprint}</option>}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Area</label>
+              <select value={form.area || ''} onChange={(e) => set('area', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm">
+                <option value="">Select area...</option>
+                {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Type</label>
+              <select value={form.type || ''} onChange={(e) => set('type', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm">
+                {['Enhancement', 'Bug Fix', 'Bug (Critical)', 'Feature Gap', 'Refactor', 'Documentation'].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Priority</label>
+              <select value={form.priority} onChange={(e) => set('priority', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm">
+                {['high', 'medium', 'low'].map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Status</label>
+              <select value={form.status} onChange={(e) => set('status', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm">
+                {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Est. Hours</label>
+              <input type="number" min={0} step={0.5} value={form.est_hours} onChange={(e) => set('est_hours', parseFloat(e.target.value) || 0)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Assignee</label>
+              <select value={form.assignee} onChange={(e) => set('assignee', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm">
+                <option value="">Unassigned</option>
+                {ASSIGNEES.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Blocked By</label>
+              <input value={form.blocked_by} onChange={(e) => set('blocked_by', e.target.value)} placeholder="Task ID" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Notes</label>
+            <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none" />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between mt-6">
+          <button type="button" onClick={() => onDelete(task.id)} className="text-red-400 hover:text-red-300 text-sm">
+            Delete
+          </button>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-400 hover:text-white">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving} className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium">
+              {saving ? 'Saving...' : 'Update'}
+            </button>
+          </div>
+        </div>
+      </form>
     </div>
   );
 }
