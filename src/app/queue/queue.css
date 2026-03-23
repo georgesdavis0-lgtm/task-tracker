@@ -1,0 +1,54 @@
+/* Drag placeholder */
+.queue-drag-placeholder {
+  border: 2px dashed rgba(59, 130, 246, 0.4);
+  border-radius: 0.75rem;
+  background: rgba(59, 130, 246, 0.05);
+  min-height: 80px;
+  transition: all 150ms ease;
+}
+
+/* Drag overlay card */
+.queue-drag-overlay {
+  transform: scale(1.03);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
+  opacity: 0.95;
+  cursor: grabbing;
+}
+
+/* Dragging source item */
+.queue-card-dragging {
+  opacity: 0.3;
+}
+
+/* Quick action buttons - hidden by default, visible on hover */
+.queue-card-actions {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.queue-card:hover .queue-card-actions {
+  opacity: 1;
+}
+
+/* Toast notification */
+.queue-toast {
+  animation: toast-slide-in 200ms ease-out;
+}
+.queue-toast-exit {
+  animation: toast-slide-out 200ms ease-in forwards;
+}
+@keyframes toast-slide-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes toast-slide-out {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(100%); opacity: 0; }
+}
+
+/* Drag handle cursor */
+.queue-drag-handle {
+  cursor: grab;
+}
+.queue-drag-handle:active {
+  cursor: grabbing;
+}
