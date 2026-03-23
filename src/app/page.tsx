@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import Link from 'next/link';
 import { DevTask, PROJECTS, AREAS, STATUSES, STATUS_LABELS, FeatureSubmission, SUBMISSION_TYPE_LABELS, SUBMISSION_STATUS_LABELS, SUBMISSION_STATUSES } from '@/lib/types';
 
 function getProjectById(id: string) {
@@ -349,6 +350,12 @@ export default function Home() {
               </span>
             )}
           </button>
+          <Link
+            href="/queue"
+            className="px-3 py-1 rounded text-sm text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
+          >
+            Queue
+          </Link>
         </div>
         {view !== 'submissions' && <>
         <div className="h-4 w-px bg-gray-700" />
