@@ -15,6 +15,7 @@ export interface DevTask {
   est_hours: number;
   notes: string;
   updated_at: string;
+  archived: boolean;
 }
 
 export const PROJECTS = [

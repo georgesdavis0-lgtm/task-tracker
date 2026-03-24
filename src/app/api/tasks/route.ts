@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-server';
 
-// GET /api/tasks — list all tasks
-export async function GET() {
+// GET /api/tasks — list tasks (default: active only)
+// ?include_archived=true — return all tasks
+// ?archived_only=true — return only archived tasks
+export async function GET(req: NextRequest) {
   try {
+    const includeArchived = req.nextUrl.searchParams.get('include_archived') === 'true';
+    const archivedOnly = req.nextUrl.searchParams.get('archived_only') === 'true';
+
     const sb = getSupabaseAdmin();
-    const { data, error } = await sb
-      .from('sprint_tasks')
-      .select('*')
-      .order('id');
+    let query = sb.from('sprint_tasks').select('*');
+
+    if (archivedOnly) {
+      query = query.eq('archived', true);
+    } else if (!includeArchived) {
+      query = query.eq('archived', false);
+    }
+
+    const { data, error } = await query.order('id');
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });

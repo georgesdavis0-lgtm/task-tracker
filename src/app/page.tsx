@@ -152,6 +152,9 @@ export default function Home() {
   const [modalTask, setModalTask] = useState<DevTask | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showArchived, setShowArchived] = useState<'active' | 'archived'>('active');
+  const [archiving, setArchiving] = useState(false);
+  const [allSprints, setAllSprints] = useState<string[]>([]);
 
   // Board drag-and-drop state
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -208,7 +211,8 @@ export default function Home() {
   // Load tasks
   const loadTasks = useCallback(async () => {
     try {
-      const res = await fetch('/api/tasks');
+      const param = showArchived === 'archived' ? '?archived_only=true' : '';
+      const res = await fetch(`/api/tasks${param}`);
       if (!res.ok) throw new Error('Failed to load');
       const data = await res.json();
       setTasks(data);
@@ -218,13 +222,30 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  }, [showArchived]);
+
+  // Load all sprints (including from archived tasks) for the filter dropdown
+  const loadAllSprints = useCallback(async () => {
+    try {
+      const res = await fetch('/api/tasks?include_archived=true');
+      if (!res.ok) return;
+      const data: DevTask[] = await res.json();
+      const sprintSet = [...new Set(data.map((t) => t.sprint).filter(Boolean))]
+        .sort((a, b) => {
+          const na = parseInt((a as string).replace('Sprint ', ''), 10);
+          const nb = parseInt((b as string).replace('Sprint ', ''), 10);
+          return na - nb;
+        }) as string[];
+      setAllSprints(sprintSet);
+    } catch { /* ignore */ }
   }, []);
 
   useEffect(() => {
     loadTasks();
+    loadAllSprints();
     const interval = setInterval(loadTasks, 30000);
     return () => clearInterval(interval);
-  }, [loadTasks]);
+  }, [loadTasks, loadAllSprints]);
 
   // Filter tasks
   const areas = useMemo(
@@ -232,15 +253,15 @@ export default function Home() {
     [tasks]
   );
 
+  // Use allSprints (from all tasks including archived) so archived sprints remain in dropdown
   const sprints = useMemo(
-    () =>
-      [...new Set(tasks.map((t) => t.sprint).filter(Boolean))]
+    () => allSprints.length > 0 ? allSprints : [...new Set(tasks.map((t) => t.sprint).filter(Boolean))]
         .sort((a, b) => {
           const na = parseInt((a as string).replace('Sprint ', ''), 10);
           const nb = parseInt((b as string).replace('Sprint ', ''), 10);
           return na - nb;
         }) as string[],
-    [tasks]
+    [tasks, allSprints]
   );
 
   const assignees = useMemo(
@@ -427,6 +448,58 @@ export default function Home() {
     }
   }
 
+  async function archiveTasks(ids: string[]) {
+    if (ids.length === 0) return;
+    setArchiving(true);
+    try {
+      const res = await fetch('/api/tasks/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) throw new Error();
+      const result = await res.json();
+      setTasks((prev) => prev.filter((t) => !ids.includes(t.id)));
+      setSyncStatus(`Archived ${result.archived_count}`);
+      setTimeout(() => setSyncStatus('Connected'), 2000);
+    } catch {
+      alert('Archive failed');
+    } finally {
+      setArchiving(false);
+    }
+  }
+
+  async function unarchiveTasks(ids: string[]) {
+    if (ids.length === 0) return;
+    setArchiving(true);
+    try {
+      const res = await fetch('/api/tasks/unarchive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) throw new Error();
+      const result = await res.json();
+      setTasks((prev) => prev.filter((t) => !ids.includes(t.id)));
+      setSyncStatus(`Unarchived ${result.unarchived_count}`);
+      setTimeout(() => setSyncStatus('Connected'), 2000);
+    } catch {
+      alert('Unarchive failed');
+    } finally {
+      setArchiving(false);
+    }
+  }
+
+  async function archiveSingleTask(id: string) {
+    await archiveTasks([id]);
+    setModalOpen(false);
+  }
+
+  async function unarchiveSingleTask(id: string) {
+    await unarchiveTasks([id]);
+    setModalOpen(false);
+  }
+
   function handleSort(field: string) {
     if (sortField === field) setSortAsc(!sortAsc);
     else {
@@ -472,6 +545,7 @@ export default function Home() {
       est_hours: 0,
       notes: '',
       updated_at: '',
+      archived: false,
     };
     setAcceptingSubmission(sub);
     setModalTask(prefilled);
@@ -549,7 +623,7 @@ export default function Home() {
               key={v}
               onClick={() => setView(v as 'board' | 'list' | 'submissions')}
               className={`px-3 py-1 rounded text-sm capitalize ${
-                view === v ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+                view === v && showArchived === 'active' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
               }`}
             >
               {v}
@@ -574,6 +648,18 @@ export default function Home() {
           >
             Queue
           </Link>
+          <div className="h-4 w-px bg-gray-700" />
+          <button
+            onClick={() => {
+              setShowArchived(showArchived === 'active' ? 'archived' : 'active');
+              if (view === 'submissions') setView('board');
+            }}
+            className={`px-3 py-1 rounded text-sm flex items-center gap-1.5 ${
+              showArchived === 'archived' ? 'bg-amber-600/30 text-amber-400' : 'text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            {showArchived === 'archived' ? '📦 Archived' : 'Archived'}
+          </button>
         </div>
         {view !== 'submissions' && <>
         <div className="h-4 w-px bg-gray-700" />
@@ -650,7 +736,7 @@ export default function Home() {
       </div>
 
       {/* Stats — hidden in submissions view */}
-      {view !== 'submissions' && <div className="flex flex-wrap gap-4 mb-5 text-sm text-gray-400">
+      {view !== 'submissions' && <div className="flex flex-wrap items-center gap-4 mb-5 text-sm text-gray-400">
         <span>
           <span className="text-white font-semibold">{stats.total}</span> total
         </span>
@@ -672,6 +758,49 @@ export default function Home() {
         <span>
           <span className="text-white font-semibold">{stats.totalHours}</span> est. hours
         </span>
+        {showArchived === 'active' && stats.done > 0 && (
+          <>
+            <div className="h-4 w-px bg-gray-700" />
+            <button
+              onClick={() => {
+                const doneIds = filtered.filter((t) => t.status === 'done').map((t) => t.id);
+                if (doneIds.length === 0) return;
+                if (!confirm(`Archive ${doneIds.length} done task(s)?`)) return;
+                archiveTasks(doneIds);
+              }}
+              disabled={archiving}
+              className="text-xs px-2.5 py-1 rounded bg-amber-600/20 text-amber-400 hover:bg-amber-600/30 disabled:opacity-50 transition-colors"
+            >
+              {archiving ? 'Archiving...' : `Archive All Done (${stats.done})`}
+            </button>
+          </>
+        )}
+        {showArchived === 'active' && filtered.length > 0 && (
+          <button
+            onClick={() => {
+              const ids = filtered.map((t) => t.id);
+              if (!confirm(`Archive ${ids.length} filtered task(s)?`)) return;
+              archiveTasks(ids);
+            }}
+            disabled={archiving}
+            className="text-xs px-2.5 py-1 rounded bg-gray-700 text-gray-300 hover:bg-gray-600 disabled:opacity-50 transition-colors"
+          >
+            Archive Filtered ({filtered.length})
+          </button>
+        )}
+        {showArchived === 'archived' && filtered.length > 0 && (
+          <button
+            onClick={() => {
+              const ids = filtered.map((t) => t.id);
+              if (!confirm(`Unarchive ${ids.length} task(s)?`)) return;
+              unarchiveTasks(ids);
+            }}
+            disabled={archiving}
+            className="text-xs px-2.5 py-1 rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 disabled:opacity-50 transition-colors"
+          >
+            Unarchive Filtered ({filtered.length})
+          </button>
+        )}
       </div>}
 
       {/* Board View */}
@@ -683,7 +812,7 @@ export default function Home() {
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
-          <div className="flex gap-4 overflow-x-auto pb-4">
+          <div className={`flex gap-4 overflow-x-auto pb-4${showArchived === 'archived' ? ' opacity-50' : ''}`}>
             {STATUSES.map((status) => {
               const col = filtered.filter((t) => t.status === status);
               return (
@@ -736,7 +865,7 @@ export default function Home() {
                 <tr
                   key={task.id}
                   onClick={() => openEdit(task)}
-                  className="border-b border-gray-800/50 hover:bg-gray-900 cursor-pointer"
+                  className={`border-b border-gray-800/50 hover:bg-gray-900 cursor-pointer${showArchived === 'archived' ? ' opacity-50' : ''}`}
                 >
                   <td className="py-2 px-3 text-gray-500">#{task.id}</td>
                   <td className="py-2 px-3">{task.sprint || ''}</td>
@@ -964,6 +1093,10 @@ export default function Home() {
           onDelete={deleteTask}
           onClose={() => { setModalOpen(false); setAcceptingSubmission(null); }}
           isAccepting={!!acceptingSubmission}
+          showArchived={showArchived}
+          onArchive={archiveSingleTask}
+          onUnarchive={unarchiveSingleTask}
+          archiving={archiving}
         />
       )}
     </div>
@@ -980,6 +1113,10 @@ function TaskModal({
   onDelete,
   onClose,
   isAccepting,
+  showArchived,
+  onArchive,
+  onUnarchive,
+  archiving,
 }: {
   task: DevTask | null;
   saving: boolean;
@@ -988,6 +1125,10 @@ function TaskModal({
   onDelete: (id: string) => void;
   onClose: () => void;
   isAccepting?: boolean;
+  showArchived: 'active' | 'archived';
+  onArchive: (id: string) => void;
+  onUnarchive: (id: string) => void;
+  archiving: boolean;
 }) {
   const [addingSprint, setAddingSprint] = useState(false);
   const [newSprintNum, setNewSprintNum] = useState('');
@@ -1009,6 +1150,7 @@ function TaskModal({
       est_hours: 0,
       notes: '',
       updated_at: '',
+      archived: false,
     }
   );
 
@@ -1252,7 +1394,7 @@ function TaskModal({
         </div>
 
         <div className="flex items-center justify-between mt-6">
-          <div>
+          <div className="flex items-center gap-3">
             {task && task.id && !isAccepting && (
               <button
                 type="button"
@@ -1260,6 +1402,26 @@ function TaskModal({
                 className="text-red-400 hover:text-red-300 text-sm"
               >
                 Delete
+              </button>
+            )}
+            {task && task.id && !isAccepting && showArchived === 'active' && (
+              <button
+                type="button"
+                onClick={() => onArchive(task.id)}
+                disabled={archiving}
+                className="text-amber-400 hover:text-amber-300 text-sm disabled:opacity-50"
+              >
+                {archiving ? 'Archiving...' : 'Archive'}
+              </button>
+            )}
+            {task && task.id && showArchived === 'archived' && (
+              <button
+                type="button"
+                onClick={() => onUnarchive(task.id)}
+                disabled={archiving}
+                className="text-blue-400 hover:text-blue-300 text-sm disabled:opacity-50"
+              >
+                {archiving ? 'Unarchiving...' : 'Unarchive'}
               </button>
             )}
           </div>

@@ -361,7 +361,7 @@ export default function QueuePage() {
     const result: Record<string, DevTask[]> = {};
     for (const name of ASSIGNEES) {
       const assigneeTasks = allTasks.filter(
-        t => t.assignee === name && t.status !== 'done'
+        t => t.assignee === name && t.status !== 'done' && !t.archived
       );
       result[name] = mergeWithStoredOrder(assigneeTasks, queueOrder[name] || []);
     }
@@ -385,6 +385,7 @@ export default function QueuePage() {
     const q = addToQueueSearch.toLowerCase();
     return allTasks.filter(t =>
       t.status !== 'done' &&
+      !t.archived &&
       !ASSIGNEES.includes(t.assignee as typeof ASSIGNEES[number]) &&
       (!q || t.title.toLowerCase().includes(q) || t.id.toLowerCase().includes(q))
     );
