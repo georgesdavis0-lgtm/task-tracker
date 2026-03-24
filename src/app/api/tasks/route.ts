@@ -6,7 +6,7 @@ export async function GET() {
   try {
     const sb = getSupabaseAdmin();
     const { data, error } = await sb
-      .from('dev_tasks')
+      .from('sprint_tasks')
       .select('*')
       .order('id');
 
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
 
     const sb = getSupabaseAdmin();
     const { data, error } = await sb
-      .from('dev_tasks')
+      .from('sprint_tasks')
       .upsert(task)
       .select()
       .single();
@@ -61,7 +61,7 @@ export async function DELETE(req: NextRequest) {
     }
 
     const sb = getSupabaseAdmin();
-    const { error } = await sb.from('dev_tasks').delete().eq('id', id);
+    const { error } = await sb.from('sprint_tasks').delete().eq('id', id);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });

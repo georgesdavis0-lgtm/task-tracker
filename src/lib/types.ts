@@ -73,7 +73,7 @@ export interface FeatureSubmission {
   submitted_by_phone: string | null;
   status: 'new' | 'reviewed' | 'accepted' | 'declined';
   image_urls: string[] | null;
-  linked_task_id: string | null; // ID of dev_tasks entry if converted
+  linked_task_id: string | null; // ID of sprint_tasks entry if converted
   created_at: string;
   reviewed_at: string | null;
 }
