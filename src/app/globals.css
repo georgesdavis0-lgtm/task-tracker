@@ -38,3 +38,11 @@ body {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+/* Board drag handle */
+.board-drag-handle {
+  cursor: grab;
+}
+.board-drag-handle:active {
+  cursor: grabbing;
+}

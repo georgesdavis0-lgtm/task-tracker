@@ -1,7 +1,27 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
+import {
+  DndContext,
+  DragOverlay,
+  closestCenter,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  useDroppable,
+  type DragStartEvent,
+  type DragEndEvent,
+  type DragOverEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { DevTask, PROJECTS, AREAS, STATUSES, STATUS_LABELS, FeatureSubmission, SUBMISSION_TYPE_LABELS, SUBMISSION_STATUS_LABELS, SUBMISSION_STATUSES } from '@/lib/types';
 
 function getProjectById(id: string) {
@@ -16,6 +36,110 @@ function getTypeClass(type: string | null) {
   return '';
 }
 
+// ── Board drag-and-drop components ──
+
+function BoardTaskCard({ task, dragHandleProps, isOverlay }: {
+  task: DevTask;
+  dragHandleProps?: Record<string, unknown>;
+  isOverlay?: boolean;
+}) {
+  const proj = getProjectById(task.project);
+  return (
+    <div
+      className={`bg-gray-900 border border-gray-800 rounded-lg p-3 transition-colors priority-${task.priority} ${
+        isOverlay ? 'shadow-2xl opacity-95 cursor-grabbing' : 'hover:border-gray-600 cursor-pointer'
+      }`}
+    >
+      <div className="flex gap-2">
+        <div
+          {...dragHandleProps}
+          className="board-drag-handle flex-shrink-0 mt-0.5 text-gray-600 hover:text-gray-400 transition-colors"
+        >
+          <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor">
+            <circle cx="2.5" cy="2.5" r="1.5" />
+            <circle cx="7.5" cy="2.5" r="1.5" />
+            <circle cx="2.5" cy="8" r="1.5" />
+            <circle cx="7.5" cy="8" r="1.5" />
+            <circle cx="2.5" cy="13.5" r="1.5" />
+            <circle cx="7.5" cy="13.5" r="1.5" />
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-1.5">
+            <span
+              className="text-xs px-1.5 py-0.5 rounded"
+              style={{ background: `${proj.color}20`, color: proj.color }}
+            >
+              {proj.name}
+            </span>
+            <span className="text-xs text-gray-500">{task.sprint || ''}</span>
+          </div>
+          {task.area && <div className="text-xs text-gray-500 mb-1">{task.area}</div>}
+          <div className="text-sm font-medium mb-2">{task.title}</div>
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <span>#{task.id}</span>
+            <div className="flex items-center gap-2">
+              {task.type && (
+                <span className={`px-1.5 py-0.5 rounded ${getTypeClass(task.type)}`}>{task.type}</span>
+              )}
+              {task.assignee && <span>{task.assignee}</span>}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SortableBoardCard({ task, onEdit }: { task: DevTask; onEdit: (task: DevTask) => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: task.id,
+    data: { status: task.status },
+  });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={isDragging ? 'opacity-30' : ''}
+      onClick={() => !isDragging && onEdit(task)}
+    >
+      <BoardTaskCard task={task} dragHandleProps={{ ...attributes, ...listeners }} />
+    </div>
+  );
+}
+
+function DroppableBoardColumn({ status, label, tasks, onEdit }: {
+  status: string;
+  label: string;
+  tasks: DevTask[];
+  onEdit: (task: DevTask) => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: status });
+  const ids = useMemo(() => tasks.map((t) => t.id), [tasks]);
+
+  return (
+    <div className="min-w-[280px] flex-1">
+      <div className="flex items-center justify-between mb-3 px-1">
+        <h3 className="font-semibold text-sm text-gray-300">{label}</h3>
+        <span className="text-xs bg-gray-800 px-2 py-0.5 rounded-full text-gray-400">{tasks.length}</span>
+      </div>
+      <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+        <div
+          ref={setNodeRef}
+          className={`space-y-2 min-h-[80px] rounded-lg p-1 transition-colors ${
+            isOver ? 'bg-blue-900/20 ring-1 ring-blue-700/40 ring-inset' : ''
+          }`}
+        >
+          {tasks.map((task) => (
+            <SortableBoardCard key={task.id} task={task} onEdit={onEdit} />
+          ))}
+        </div>
+      </SortableContext>
+    </div>
+  );
+}
+
 export default function Home() {
   const [tasks, setTasks] = useState<DevTask[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,6 +152,15 @@ export default function Home() {
   const [modalTask, setModalTask] = useState<DevTask | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Board drag-and-drop state
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const dragOriginRef = useRef<string | null>(null);
+  const tasksRef = useRef(tasks);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   // Submissions state
   const [submissions, setSubmissions] = useState<FeatureSubmission[]>([]);
@@ -212,6 +345,88 @@ export default function Home() {
     }
   }
 
+  // ── Board drag-and-drop handlers ──
+
+  // Keep a ref to the latest tasks to avoid stale closure in event handlers
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
+
+  function handleDragStart(event: DragStartEvent) {
+    const id = String(event.active.id);
+    setActiveId(id);
+    const task = tasksRef.current.find((t) => t.id === id);
+    dragOriginRef.current = task?.status ?? null;
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    const { active, over } = event;
+    if (!over) return;
+
+    const activeTaskId = String(active.id);
+    const overId = String(over.id);
+    const current = tasksRef.current;
+    const activeTask = current.find((t) => t.id === activeTaskId);
+    if (!activeTask) return;
+
+    // Determine target status: either a column id or another task's column
+    let targetStatus: string | null = null;
+    if ((STATUSES as readonly string[]).includes(overId)) {
+      targetStatus = overId;
+    } else {
+      const overTask = current.find((t) => t.id === overId);
+      if (overTask) targetStatus = overTask.status;
+    }
+
+    if (!targetStatus || activeTask.status === targetStatus) return;
+
+    setTasks((prev) =>
+      prev.map((t) => t.id === activeTaskId ? { ...t, status: targetStatus } : t)
+    );
+  }
+
+  async function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    const activeTaskId = String(active.id);
+    const originalStatus = dragOriginRef.current;
+
+    setActiveId(null);
+    dragOriginRef.current = null;
+
+    const task = tasksRef.current.find((t) => t.id === activeTaskId);
+    if (!task || !originalStatus) return;
+
+    // Revert if dropped outside any target
+    if (!over) {
+      setTasks((prev) =>
+        prev.map((t) => t.id === activeTaskId ? { ...t, status: originalStatus } : t)
+      );
+      return;
+    }
+
+    // Nothing changed
+    if (task.status === originalStatus) return;
+
+    // Persist the new status
+    try {
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(task),
+      });
+      if (!res.ok) throw new Error('Failed to update task status');
+      const saved = await res.json();
+      setTasks((prev) => prev.map((t) => t.id === saved.id ? saved : t));
+      setSyncStatus('Saved');
+      setTimeout(() => setSyncStatus('Connected'), 2000);
+    } catch {
+      // Revert on failure
+      setTasks((prev) =>
+        prev.map((t) => t.id === activeTaskId ? { ...t, status: originalStatus } : t)
+      );
+      setSyncStatus('Error');
+      setTimeout(() => setSyncStatus('Connected'), 2000);
+    }
+  }
+
   function handleSort(field: string) {
     if (sortField === field) setSortAsc(!sortAsc);
     else {
@@ -279,6 +494,9 @@ export default function Home() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [modalOpen]);
+
+  // Active task for DragOverlay
+  const activeTask = activeId ? tasks.find((t) => t.id === activeId) ?? null : null;
 
   if (loading) {
     return (
@@ -458,63 +676,31 @@ export default function Home() {
 
       {/* Board View */}
       {view === 'board' && (
-        <div className="flex gap-4 overflow-x-auto pb-4">
-          {STATUSES.map((status) => {
-            const col = filtered.filter((t) => t.status === status);
-            return (
-              <div key={status} className="min-w-[280px] flex-1">
-                <div className="flex items-center justify-between mb-3 px-1">
-                  <h3 className="font-semibold text-sm text-gray-300">{STATUS_LABELS[status]}</h3>
-                  <span className="text-xs bg-gray-800 px-2 py-0.5 rounded-full text-gray-400">
-                    {col.length}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {col.map((task) => {
-                    const proj = getProjectById(task.project);
-                    return (
-                      <div
-                        key={task.id}
-                        onClick={() => openEdit(task)}
-                        className={`bg-gray-900 border border-gray-800 rounded-lg p-3 cursor-pointer hover:border-gray-600 transition-colors priority-${task.priority}`}
-                      >
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span
-                            className="text-xs px-1.5 py-0.5 rounded"
-                            style={{
-                              background: `${proj.color}20`,
-                              color: proj.color,
-                            }}
-                          >
-                            {proj.name}
-                          </span>
-                          <span className="text-xs text-gray-500">{task.sprint || ''}</span>
-                        </div>
-                        {task.area && (
-                          <div className="text-xs text-gray-500 mb-1">{task.area}</div>
-                        )}
-                        <div className="text-sm font-medium mb-2">{task.title}</div>
-                        <div className="flex items-center justify-between text-xs text-gray-500">
-                          <span>#{task.id}</span>
-                          <div className="flex items-center gap-2">
-                            {task.type && (
-                              <span
-                                className={`px-1.5 py-0.5 rounded ${getTypeClass(task.type)}`}
-                              >
-                                {task.type}
-                              </span>
-                            )}
-                            {task.assignee && <span>{task.assignee}</span>}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+        >
+          <div className="flex gap-4 overflow-x-auto pb-4">
+            {STATUSES.map((status) => {
+              const col = filtered.filter((t) => t.status === status);
+              return (
+                <DroppableBoardColumn
+                  key={status}
+                  status={status}
+                  label={STATUS_LABELS[status]}
+                  tasks={col}
+                  onEdit={openEdit}
+                />
+              );
+            })}
+          </div>
+          <DragOverlay>
+            {activeTask ? <BoardTaskCard task={activeTask} isOverlay /> : null}
+          </DragOverlay>
+        </DndContext>
       )}
 
       {/* List View */}
