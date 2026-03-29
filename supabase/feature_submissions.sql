@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS feature_submissions (
   submitted_by_name   text,
   submitted_by_email  text,
   submitted_by_phone  text,
+  image_urls          text[],
   status              text NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'reviewed', 'accepted', 'declined')),
   linked_task_id      text, -- References sprint_tasks.id if converted to a task
   reviewed_at         timestamptz,
